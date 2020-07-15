@@ -1,45 +1,27 @@
 /**
- *    Copyright 2009-2020 the original author or authors.
- *
- *    Licensed under the Apache License, Version 2.0 (the "License");
- *    you may not use this file except in compliance with the License.
- *    You may obtain a copy of the License at
- *
- *       http://www.apache.org/licenses/LICENSE-2.0
- *
- *    Unless required by applicable law or agreed to in writing, software
- *    distributed under the License is distributed on an "AS IS" BASIS,
- *    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *    See the License for the specific language governing permissions and
- *    limitations under the License.
+ * Copyright 2009-2020 the original author or authors.
+ * <p>
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * <p>
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 package org.apache.ibatis.reflection;
 
-import java.lang.reflect.Array;
-import java.lang.reflect.Constructor;
-import java.lang.reflect.Field;
-import java.lang.reflect.GenericArrayType;
-import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
-import java.lang.reflect.ParameterizedType;
-import java.lang.reflect.ReflectPermission;
-import java.lang.reflect.Type;
-import java.text.MessageFormat;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Map.Entry;
-
-import org.apache.ibatis.reflection.invoker.AmbiguousMethodInvoker;
-import org.apache.ibatis.reflection.invoker.GetFieldInvoker;
-import org.apache.ibatis.reflection.invoker.Invoker;
-import org.apache.ibatis.reflection.invoker.MethodInvoker;
-import org.apache.ibatis.reflection.invoker.SetFieldInvoker;
+import org.apache.ibatis.reflection.invoker.*;
 import org.apache.ibatis.reflection.property.PropertyNamer;
+
+import java.lang.reflect.*;
+import java.text.MessageFormat;
+import java.util.*;
+import java.util.Map.Entry;
 
 /**
  * This class represents a cached set of class definition information that
@@ -49,25 +31,54 @@ import org.apache.ibatis.reflection.property.PropertyNamer;
  */
 public class Reflector {
 
+  /**
+   * 对应的 Class 类型
+   */
   private final Class<?> type;
+  /**
+   * 可读属性的名称集合
+   */
   private final String[] readablePropertyNames;
+  /**
+   * 可写属性的名称集合
+   */
   private final String[] writablePropertyNames;
-  private final Map<String, Invoker> setMethods = new HashMap<>();
-  private final Map<String, Invoker> getMethods = new HashMap<>();
-  private final Map<String, Class<?>> setTypes = new HashMap<>();
-  private final Map<String, Class<?>> getTypes = new HashMap<>();
-  private Constructor<?> defaultConstructor;
 
+  /**
+   * 相应属性的 setter 方法， key 是 属性名称 value 是 Invoker 对象
+   */
+  private final Map<String, Invoker> setMethods = new HashMap<>();
+  /**
+   * 相应属性的 getter 方法， key 是 属性名称 value 是 Invoker 对象
+   */
+  private final Map<String, Invoker> getMethods = new HashMap<>();
+  /**
+   * 相应 属性 的 方法参数 类型，key 是 属性名称 value 是 setter 方法的参数类型
+   */
+  private final Map<String, Class<?>> setTypes = new HashMap<>();
+  /**
+   * 相应 属性的 返回值 类型，key 是 属性名称 value 是 getter 方法的个返回值类型
+   */
+  private final Map<String, Class<?>> getTypes = new HashMap<>();
+  /**
+   * 默认构造器方法
+   */
+  private Constructor<?> defaultConstructor;
+  /**
+   * 所有属性名称的集合
+   */
   private Map<String, String> caseInsensitivePropertyMap = new HashMap<>();
 
   public Reflector(Class<?> clazz) {
-    type = clazz;
-    addDefaultConstructor(clazz);
-    addGetMethods(clazz);
-    addSetMethods(clazz);
-    addFields(clazz);
+    type = clazz; // 初始化 type 字段
+    addDefaultConstructor(clazz); // 查找 clazz 的默认构造器
+    addGetMethods(clazz); // 处理 clazz 中的 getter 方法, 填充 getMethod 集合 和 getTypes 集合
+    addSetMethods(clazz); // 处理 clazz 中的 setter 方法，填充 setMethod 集合 和 setTypes 集合
+    addFields(clazz); // 处理没有 getter/setter 方法的字段
+    // 初始化 可读/可写 的属性名称集合
     readablePropertyNames = getMethods.keySet().toArray(new String[0]);
     writablePropertyNames = setMethods.keySet().toArray(new String[0]);
+    // 初始化 caseInsensitivePropertyMap 集合，其中记录了所有大写格式的属性名称
     for (String propName : readablePropertyNames) {
       caseInsensitivePropertyMap.put(propName.toUpperCase(Locale.ENGLISH), propName);
     }
@@ -76,6 +87,9 @@ public class Reflector {
     }
   }
 
+  /**
+   * 查询 clazz 的默认构造器（无参构造方法）
+   */
   private void addDefaultConstructor(Class<?> clazz) {
     Constructor<?>[] constructors = clazz.getDeclaredConstructors();
     Arrays.stream(constructors).filter(constructor -> constructor.getParameterTypes().length == 0)
@@ -85,16 +99,21 @@ public class Reflector {
   private void addGetMethods(Class<?> clazz) {
     Map<String, List<Method>> conflictingGetters = new HashMap<>();
     Method[] methods = getClassMethods(clazz);
+    // 首先把方法中有参数的方法过滤出去，然后在判断这个方法是否是 get*/is* 的方法
+    // 在根据  PropertyNamer.methodToProperty 方法 获取属性名称
+    // 把 key 为 属性名称 value 为 对应的 Method 添加到 conflictingGetters 中
     Arrays.stream(methods).filter(m -> m.getParameterTypes().length == 0 && PropertyNamer.isGetter(m.getName()))
       .forEach(m -> addMethodConflict(conflictingGetters, PropertyNamer.methodToProperty(m.getName()), m));
+    // 添加到 getMethod 和 getTypes 中
     resolveGetterConflicts(conflictingGetters);
   }
 
   private void resolveGetterConflicts(Map<String, List<Method>> conflictingGetters) {
     for (Entry<String, List<Method>> entry : conflictingGetters.entrySet()) {
       Method winner = null;
+      // 属性名称
       String propName = entry.getKey();
-      boolean isAmbiguous = false;
+      boolean isAmbiguous = false; // true:方法违反 JavaBeans 规范 false:正确的JavaBeans
       for (Method candidate : entry.getValue()) {
         if (winner == null) {
           winner = candidate;
@@ -104,14 +123,19 @@ public class Reflector {
         Class<?> candidateType = candidate.getReturnType();
         if (candidateType.equals(winnerType)) {
           if (!boolean.class.equals(candidateType)) {
+            // 该属性对应的多个 getter 方法返回值一样，且不是 boolean 的 则违反了 JavaBeans 的规范
             isAmbiguous = true;
             break;
           } else if (candidate.getName().startsWith("is")) {
+            // 如果包含多个方法且 返回值 是 boolean 类型的，则有限选取 is开头 getter 方法
             winner = candidate;
           }
         } else if (candidateType.isAssignableFrom(winnerType)) {
+          // candidateType 是否是 winnerType 的 超类
           // OK getter type is descendant
         } else if (winnerType.isAssignableFrom(candidateType)) {
+          // winnerType 是否是 candidateType 的 超类
+          // 原则：优先选取子类，而非超类
           winner = candidate;
         } else {
           isAmbiguous = true;
@@ -124,10 +148,10 @@ public class Reflector {
 
   private void addGetMethod(String name, Method method, boolean isAmbiguous) {
     MethodInvoker invoker = isAmbiguous
-        ? new AmbiguousMethodInvoker(method, MessageFormat.format(
-            "Illegal overloaded getter method with ambiguous type for property ''{0}'' in class ''{1}''. This breaks the JavaBeans specification and can cause unpredictable results.",
-            name, method.getDeclaringClass().getName()))
-        : new MethodInvoker(method);
+      ? new AmbiguousMethodInvoker(method, MessageFormat.format(
+      "Illegal overloaded getter method with ambiguous type for property ''{0}'' in class ''{1}''. This breaks the JavaBeans specification and can cause unpredictable results.",
+      name, method.getDeclaringClass().getName()))
+      : new MethodInvoker(method);
     getMethods.put(name, invoker);
     Type returnType = TypeParameterResolver.resolveReturnType(method, type);
     getTypes.put(name, typeToClass(returnType));
@@ -141,8 +165,14 @@ public class Reflector {
     resolveSetterConflicts(conflictingSetters);
   }
 
+  /**
+   * @param conflictingMethods 存放 getter/setter 方法的集合
+   * @param name               method方法对于的属性名称
+   * @param method             方法
+   */
   private void addMethodConflict(Map<String, List<Method>> conflictingMethods, String name, Method method) {
     if (isValidPropertyName(name)) {
+      // 一个属性对应多个方法
       List<Method> list = conflictingMethods.computeIfAbsent(name, k -> new ArrayList<>());
       list.add(method);
     }
@@ -185,9 +215,9 @@ public class Reflector {
       return setter1;
     }
     MethodInvoker invoker = new AmbiguousMethodInvoker(setter1,
-        MessageFormat.format(
-            "Ambiguous setters defined for property ''{0}'' in class ''{1}'' with types ''{2}'' and ''{3}''.",
-            property, setter2.getDeclaringClass().getName(), paramType1.getName(), paramType2.getName()));
+      MessageFormat.format(
+        "Ambiguous setters defined for property ''{0}'' in class ''{1}'' with types ''{2}'' and ''{3}''.",
+        property, setter2.getDeclaringClass().getName(), paramType1.getName(), paramType2.getName()));
     setMethods.put(property, invoker);
     Type[] paramTypes = TypeParameterResolver.resolveParamTypes(setter1, type);
     setTypes.put(property, typeToClass(paramTypes[0]));
@@ -259,11 +289,20 @@ public class Reflector {
     }
   }
 
+  /**
+   * 如果该属性是 $ 开头 获取名称是 serialVersionUID，获取是 class 返 false ,反之返回true
+   *
+   * @param name 属性名称
+   * @return
+   */
   private boolean isValidPropertyName(String name) {
     return !(name.startsWith("$") || "serialVersionUID".equals(name) || "class".equals(name));
   }
 
   /**
+   * 获取 该 clazz 中的所有方法
+   * 包括 clazz 本身的方法，以及 clazz 中接口方法 和 父类中的方法 父类接口中的方法 ...
+   * </p>
    * This method returns an array containing all methods
    * declared in this class and any superclass.
    * We use this method, instead of the simpler <code>Class.getMethods()</code>,
@@ -284,7 +323,6 @@ public class Reflector {
       for (Class<?> anInterface : interfaces) {
         addUniqueMethods(uniqueMethods, anInterface.getMethods());
       }
-
       currentClass = currentClass.getSuperclass();
     }
 
@@ -295,7 +333,7 @@ public class Reflector {
 
   private void addUniqueMethods(Map<String, Method> uniqueMethods, Method[] methods) {
     for (Method currentMethod : methods) {
-      if (!currentMethod.isBridge()) {
+      if (!currentMethod.isBridge()) { // 判断是否是桥接方法
         String signature = getSignature(currentMethod);
         // check to see if the method is already known
         // if it is known, then an extended class must have
@@ -307,6 +345,14 @@ public class Reflector {
     }
   }
 
+  /**
+   * 获取该方法的签名
+   * 例如：Boolean getMethods(Class class);
+   * 签名格式 Boolean#setAuthor:java.lang.Class
+   *
+   * @param method 方法
+   * @return
+   */
   private String getSignature(Method method) {
     StringBuilder sb = new StringBuilder();
     Class<?> returnType = method.getReturnType();
