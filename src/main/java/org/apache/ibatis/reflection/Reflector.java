@@ -98,6 +98,7 @@ public class Reflector {
 
   private void addGetMethods(Class<?> clazz) {
     Map<String, List<Method>> conflictingGetters = new HashMap<>();
+    // 记录 clazz 类中的全部方法
     Method[] methods = getClassMethods(clazz);
     // 首先把方法中有参数的方法过滤出去，然后在判断这个方法是否是 get*/is* 的方法
     // 在根据  PropertyNamer.methodToProperty 方法 获取属性名称
@@ -108,6 +109,15 @@ public class Reflector {
     resolveGetterConflicts(conflictingGetters);
   }
 
+  /**
+   * 解决 Getter 方法中的冲突
+   * <p>
+   * 例如：Boolean#isTrue Boolean#getTrue 选取 isTrue 方法
+   * <p>
+   * String#toString CharSequence#toString 选取 String#toString 方法
+   *
+   * @param conflictingGetters
+   */
   private void resolveGetterConflicts(Map<String, List<Method>> conflictingGetters) {
     for (Entry<String, List<Method>> entry : conflictingGetters.entrySet()) {
       Method winner = null;
@@ -160,6 +170,7 @@ public class Reflector {
   private void addSetMethods(Class<?> clazz) {
     Map<String, List<Method>> conflictingSetters = new HashMap<>();
     Method[] methods = getClassMethods(clazz);
+    // 把参数长度 > 1 的 和 不是 set* 的方法 过滤掉
     Arrays.stream(methods).filter(m -> m.getParameterTypes().length == 1 && PropertyNamer.isSetter(m.getName()))
       .forEach(m -> addMethodConflict(conflictingSetters, PropertyNamer.methodToProperty(m.getName()), m));
     resolveSetterConflicts(conflictingSetters);
@@ -180,19 +191,21 @@ public class Reflector {
 
   private void resolveSetterConflicts(Map<String, List<Method>> conflictingSetters) {
     for (Entry<String, List<Method>> entry : conflictingSetters.entrySet()) {
-      String propName = entry.getKey();
-      List<Method> setters = entry.getValue();
-      Class<?> getterType = getTypes.get(propName);
-      boolean isGetterAmbiguous = getMethods.get(propName) instanceof AmbiguousMethodInvoker;
+      String propName = entry.getKey(); // 属性名称
+      List<Method> setters = entry.getValue(); // 对应的 setter 方法集合
+      Class<?> getterType = getTypes.get(propName); // 获取 getter 方法的返回值类型
+      boolean isGetterAmbiguous = getMethods.get(propName) instanceof AmbiguousMethodInvoker; // 获取 getter 的 Method Invoker
       boolean isSetterAmbiguous = false;
       Method match = null;
       for (Method setter : setters) {
+        // getter 方法是无冲突的 且 setter 方法的第一个参数的类型是和 getter 方法的返回值类型 一致
         if (!isGetterAmbiguous && setter.getParameterTypes()[0].equals(getterType)) {
           // should be the best match
           match = setter;
           break;
         }
         if (!isSetterAmbiguous) {
+          // 无冲突
           match = pickBetterSetter(match, setter, propName);
           isSetterAmbiguous = match == null;
         }
@@ -203,6 +216,14 @@ public class Reflector {
     }
   }
 
+  /**
+   * 选取更适合的 setter 方法
+   *
+   * @param setter1
+   * @param setter2
+   * @param property
+   * @return
+   */
   private Method pickBetterSetter(Method setter1, Method setter2, String property) {
     if (setter1 == null) {
       return setter2;
@@ -214,6 +235,7 @@ public class Reflector {
     } else if (paramType2.isAssignableFrom(paramType1)) {
       return setter1;
     }
+    // 如果不是 父子 关系，则构造一个 冲突的 MethodInvoker
     MethodInvoker invoker = new AmbiguousMethodInvoker(setter1,
       MessageFormat.format(
         "Ambiguous setters defined for property ''{0}'' in class ''{1}'' with types ''{2}'' and ''{3}''.",
@@ -252,6 +274,12 @@ public class Reflector {
     return result;
   }
 
+  /**
+   * 添加 setMethods 和 setTypes
+   * 添加 getMethods 和 getTypes
+   *
+   * @param clazz Bean
+   */
   private void addFields(Class<?> clazz) {
     Field[] fields = clazz.getDeclaredFields();
     for (Field field : fields) {
@@ -260,6 +288,7 @@ public class Reflector {
         // modification of final fields through reflection (JSR-133). (JGB)
         // pr #16 - final static can only be set by the classloader
         int modifiers = field.getModifiers();
+        // 不是 final 和 static 修饰的 字段
         if (!(Modifier.isFinal(modifiers) && Modifier.isStatic(modifiers))) {
           addSetField(field);
         }
@@ -331,6 +360,13 @@ public class Reflector {
     return methods.toArray(new Method[0]);
   }
 
+  /**
+   * 把 methods 方法添加到 uniqueMethods 中 key 方法签名{@link #getSignature(Method)} value {@link Method}
+   * 因为包含子类所有方法和父类所有方法，所有可能会出现签名一样的方法，如果存在则不添加，不存在则添加
+   *
+   * @param uniqueMethods
+   * @param methods
+   */
   private void addUniqueMethods(Map<String, Method> uniqueMethods, Method[] methods) {
     for (Method currentMethod : methods) {
       if (!currentMethod.isBridge()) { // 判断是否是桥接方法

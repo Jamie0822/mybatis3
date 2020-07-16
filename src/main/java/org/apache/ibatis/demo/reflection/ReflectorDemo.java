@@ -17,7 +17,7 @@ public class ReflectorDemo {
 
   public static void main(String[] args) throws NoSuchMethodException, InvocationTargetException, IllegalAccessException, InstantiationException, ClassNotFoundException {
 
-    Method method = ArticleDO.class.getMethod("setAuthor", String.class, Integer.class);
+    Method method = ArticleDO.class.getMethod("getAuthor");
     Class<? extends Class> aClass = ArticleDO.class.getClass();
     Class<?> c = Reflector.class;
     Constructor<?> declaredConstructor = c.getDeclaredConstructor(aClass);
@@ -25,6 +25,7 @@ public class ReflectorDemo {
     getSignatureMethod.setAccessible(true);
     String signature = (String)getSignatureMethod.invoke(declaredConstructor.newInstance(ArticleDO.class), method);
     System.out.println(signature);
+    System.out.println();
   }
 
 }
