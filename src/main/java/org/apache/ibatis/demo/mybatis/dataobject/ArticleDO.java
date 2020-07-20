@@ -1,5 +1,10 @@
 package org.apache.ibatis.demo.mybatis.dataobject;
 
+import org.apache.ibatis.type.TypeException;
+import org.apache.ibatis.type.TypeReference;
+
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
 import java.util.Date;
 
 /**
@@ -20,8 +25,8 @@ public class ArticleDO {
 
     private Date createTime;
 
-    public Integer getId() {
-        return id;
+  public Integer getId() {
+    return id;
     }
 
     public void setId(Integer id) {
