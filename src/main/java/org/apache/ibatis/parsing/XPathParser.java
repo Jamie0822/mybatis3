@@ -48,6 +48,10 @@ public class XPathParser {
   private final Document document;
   private boolean validation;
   private EntityResolver entityResolver;
+
+  /**
+   * 该属性在 解析 mybatis-config.xml 配置文件的 properties 节点中设置
+   */
   private Properties variables;
   private XPath xpath;
 

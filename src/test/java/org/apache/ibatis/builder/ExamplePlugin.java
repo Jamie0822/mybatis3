@@ -24,6 +24,7 @@ import org.apache.ibatis.plugin.Plugin;
 
 @Intercepts({})
 public class ExamplePlugin implements Interceptor {
+
   private Properties properties;
 
   @Override
